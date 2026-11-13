@@ -143,11 +143,11 @@ def wait_state(page, report_id, timeout, interval, *, for_replace=False, progres
     started = time.monotonic()
     while not timeout or time.monotonic() - started < timeout:
         state, text = read_status(page, report_id)
-        if state == 'complete' or (for_replace and state in ('idle', 'failed')):
+        if state == 'complete':
             return state
         if state == 'failed':
             raise RuntimeError('系统显示比对失败，请在网站查看。')
-        if state == 'idle':
+        if state == 'idle' and not for_replace:
             raise RuntimeError('报表尚未启动比对；只等待模式不会替你启动。')
         if state == 'unknown':
             raise RuntimeError('无法识别报表状态，已停止，请检查网站。')
@@ -243,47 +243,62 @@ def replace_report(page, report_id, task, checkpoint):
     if file_digest(task['upload']) != task['sha256']:
         raise RuntimeError('待上传副本已变化，已停止。请重新创建任务。')
     old_asset = uploaded_asset(page)
-    path = f'/zh-hans/pa/report/{report_id}/reupload/'
-    link = page.locator(f'a[href="{path}"], a[href="{BASE}{path}"]')
-    if link.count() != 1:
-        raise RuntimeError('找不到唯一的修正报表入口。')
-    page.goto(site_url(link.get_attribute('href')), wait_until='domcontentloaded')
+    page.goto(REPORTS + report_id + '/reupload/', wait_until='domcontentloaded')
     check_login(page)
     page.locator('#id_file').set_input_files(task['upload'])
     # 记下提交边界，失败时不自动再上传一次。
     task['old_asset'] = old_asset
     checkpoint('正在提交替换；若中断请先在网站确认是否已保存')
-    page.get_by_role('button', name=re.compile(r'^保存[并並][取替]代[报報]表$')).click(timeout=120_000)
+    page.get_by_role('button', name=re.compile(r'^(?:保存[并並][取替]代[报報]表|儲存並取代報表|Save\s+and\s+replace\s+(?:the\s+)?report)$', re.IGNORECASE)).click(timeout=120_000)
     page.wait_for_url(lambda url: '/reupload/' not in url, timeout=120_000)
     state, _ = read_status(page, report_id)
     if uploaded_asset(page) == old_asset:
         raise RuntimeError('无法确认新文件已取代旧文件，不会下载旧比对结果；请在网站检查。')
     task['replaced'] = True
     checkpoint('新文件已取代旧文件')
-    if state == 'complete':
-        raise RuntimeError('文件已替换，但网站仍显示旧的完成状态；请确认重新比对已启动后用只等待模式继续。')
     return state
 
 
-def start_match(page, report_id, checkpoint):
+def start_match(page, report_id, checkpoint, *, wait_for_entry=False):
     page.goto(REPORTS, wait_until='domcontentloaded')
     check_login(page)
     page.locator('#id_keyword').fill(report_id)
     page.get_by_role('button', name=re.compile('查询|查詢')).click()
     row = find_report_row(page, report_id)
     state = status_kind(row.inner_text())
-    if state in ('complete', 'running'):
+    if state == 'running' or (state == 'complete' and not wait_for_entry):
         return state
+    if wait_for_entry and state in ('complete', 'unknown'):
+        return 'pending'
     if state != 'idle':
         raise RuntimeError('报表状态不适合启动比对，请在网站检查。')
     link = row.get_by_role('link', name=re.compile(r'^比[对對]曲[库庫]$'))
-    if link.count() != 1:
+    count = link.count()
+    if count == 0 and wait_for_entry:
+        return 'pending'
+    if count != 1:
         raise RuntimeError('找不到唯一的比对曲库入口。')
     checkpoint('正在启动比对；若中断请在网站确认状态')
     page.goto(site_url(link.get_attribute('href')), wait_until='domcontentloaded')
     check_login(page)
     checkpoint('已打开比对入口，等待完成')
     return 'started'
+
+
+def wait_to_start_replacement(page, report_id, state, timeout, interval, checkpoint):
+    started = time.monotonic()
+    while state != 'running':
+        if state == 'failed':
+            raise RuntimeError('系统显示新报表处理失败，请在网站查看。')
+        if state == 'idle':
+            if start_match(page, report_id, checkpoint, wait_for_entry=True) != 'pending':
+                return
+        elapsed = time.monotonic() - started
+        if timeout and elapsed >= timeout:
+            raise TimeoutError('新文件已上传，等待比对入口超时。')
+        checkpoint(f'新文件已上传，等待比对入口（已等待 {int(elapsed)} 秒）')
+        time.sleep(min(interval, timeout - elapsed) if timeout else interval)
+        state, _ = read_status(page, report_id)
 
 
 def process(page, report_id, output, timeout, interval, *, task=None, checkpoint=None):
@@ -299,10 +314,7 @@ def process(page, report_id, output, timeout, interval, *, task=None, checkpoint
         elif state not in ('complete', 'idle', 'failed'):
             raise RuntimeError('无法识别报表状态，不能替换。')
         state = replace_report(page, report_id, task, checkpoint)
-        if state == 'idle':
-            start_match(page, report_id, checkpoint)
-        elif state != 'running':
-            raise RuntimeError('替换后状态不明确，请到网站确认；不会重复提交。')
+        wait_to_start_replacement(page, report_id, state, timeout, interval, checkpoint)
     elif mode == 'auto' and state == 'idle':
         start_match(page, report_id, checkpoint)
     checkpoint('等待比对完成')
@@ -350,6 +362,8 @@ def main(argv=None):
     parser.add_argument('ids', nargs='*', help='报表 ID，支持空格或逗号分隔')
     parser.add_argument('--output', type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument('--mode', choices=['auto', 'replace', 'watch', 'queue-replace'], help='不指定时交互选择')
+    parser.add_argument('--status-file', type=Path, help='供报表进度台读取的任务状态文件')
+    parser.add_argument('--yes-download', action='store_true', help='直接下载 Excel，无需确认')
     parser.add_argument('--notify-only', action='store_true', help='完成后只提醒，不下载')
     parser.add_argument('--inspect-progress', action='store_true', help='只打开一个报表的进度面板并显示文字')
     parser.add_argument('--file', type=Path, help='替换文件（仅一个报表时可用）')
@@ -364,6 +378,10 @@ def main(argv=None):
         parser.error(str(exc))
     if args.inspect_progress and (len(ids) != 1 or args.mode or args.file or args.notify_only):
         parser.error('--inspect-progress 只接受一个报表 ID，不与其他操作模式同时使用')
+    if args.yes_download and (not args.mode or args.notify_only or args.inspect_progress):
+        parser.error('--yes-download 需要指定运行模式，并且不能与仅提醒或查看进度同时使用')
+    if args.status_file and not args.yes_download:
+        parser.error('--status-file 需要 --yes-download')
     mode = args.mode
     if mode is None and not args.inspect_progress:
         print('\n这次要做什么？\n')
@@ -378,7 +396,7 @@ def main(argv=None):
         if mode is None:
             parser.error('请输入 1、2 或 3')
     download = not args.notify_only
-    if not args.notify_only and not args.inspect_progress:
+    if not args.notify_only and not args.inspect_progress and not args.yes_download:
         print('\n比对完成后，要下载 Excel 吗？')
         print('  Y  下载 Excel，并提醒我')
         print('  N  只提醒我，我自己到结果页查看错误')
@@ -410,9 +428,12 @@ def main(argv=None):
         tasks.append(task)
     log = run_dir / '任务记录.json'
     def save():
-        temporary = log.with_suffix('.tmp')
-        temporary.write_text(json.dumps(tasks, ensure_ascii=False, indent=2), encoding='utf-8')
-        temporary.replace(log)
+        data = json.dumps(tasks, ensure_ascii=False, indent=2)
+        for destination in (log, args.status_file):
+            if destination is not None:
+                temporary = destination.with_suffix('.tmp')
+                temporary.write_text(data, encoding='utf-8')
+                temporary.replace(destination)
     save()
     print(f'\n任务记录：{log}\n保持电脑唤醒、网络连接，勿关闭工具及专用 Chrome。', flush=True)
     from playwright.sync_api import sync_playwright
@@ -431,7 +452,16 @@ def main(argv=None):
             page.goto(REPORTS, wait_until='domcontentloaded')
             if '/accounts/' in page.url:
                 print('请在新开的专用 Chrome 窗口完成登录（密码不用填在这里）。')
-                input('登录成功后，回到这里按 Enter 继续…')
+                if args.status_file:
+                    for task in tasks:
+                        task['phase'] = '请在专用 Chrome 完成登录'
+                    save()
+                    page.wait_for_url(
+                        lambda url: url.startswith(BASE + '/zh-hans/pa/'), timeout=0,
+                        wait_until='domcontentloaded',
+                    )
+                else:
+                    input('登录成功后，回到这里按 Enter 继续…')
                 page.goto(REPORTS, wait_until='domcontentloaded')
                 check_login(page)
             if args.inspect_progress:

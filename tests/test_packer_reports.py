@@ -107,11 +107,27 @@ class PackerTests(unittest.TestCase):
         def replace(*args):
             events.append('upload')
             return 'idle'
-        with patch.object(p, 'read_status', return_value=('running', '')), patch.object(p, 'wait_state', side_effect=wait), patch.object(p, 'replace_report', side_effect=replace), patch.object(p, 'start_match', side_effect=lambda *a: events.append('start')), patch.object(p, 'result_link', return_value=p.REPORTS + '1001/match/result/not_found/'), patch.object(p, 'notify'):
+        with patch.object(p, 'read_status', return_value=('running', '')), patch.object(p, 'wait_state', side_effect=wait), patch.object(p, 'replace_report', side_effect=replace), patch.object(p, 'start_match', side_effect=lambda *a, **kw: events.append('start')), patch.object(p, 'result_link', return_value=p.REPORTS + '1001/match/result/not_found/'), patch.object(p, 'notify'):
             result = p.process(page, '1001', Path('/unused'), 0, 30, task=task)
         self.assertEqual(events, ['old_done', 'upload', 'start', 'new_done'])
         self.assertFalse(result['downloaded'])
         page.expect_download.assert_not_called()
+
+    def test_replacement_waits_for_completion_even_if_status_returns_to_idle(self):
+        states = [('running', ''), ('idle', ''), ('complete', '')]
+        with patch.object(p, 'read_status', side_effect=states), patch.object(p.time, 'sleep') as sleep:
+            self.assertEqual(p.wait_state(Mock(), '1001', 0, 30, for_replace=True), 'complete')
+        self.assertEqual(sleep.call_count, 2)
+
+    def test_replacement_waits_for_new_match_entry(self):
+        page = Mock()
+        checkpoint = Mock()
+        with patch.object(p, 'start_match', side_effect=['pending', 'started']) as start, patch.object(
+            p, 'read_status', side_effect=[('idle', ''), ('idle', '')]
+        ), patch.object(p.time, 'sleep') as sleep:
+            p.wait_to_start_replacement(page, '1001', 'complete', 0, 30, checkpoint)
+        self.assertEqual(start.call_count, 2)
+        self.assertEqual(sleep.call_count, 2)
 
     def test_notify_only_does_not_upload_start_or_download(self):
         page = Mock(url=p.REPORTS)

@@ -9,10 +9,12 @@ import shutil
 import subprocess
 import sys
 import tkinter as tk
+import webbrowser
+from collections import deque
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from tempfile import NamedTemporaryFile, mkdtemp
+from tempfile import NamedTemporaryFile, TemporaryDirectory, mkdtemp
 from tkinter import messagebox, simpledialog, ttk
 
 from openpyxl import load_workbook
@@ -344,6 +346,116 @@ def main() -> None:
     tools_bar = tk.Frame(root, background="#EEF3F7")
     tools_bar.grid(row=6, column=0, sticky="ew", padx=18, pady=9)
 
+    packer_queue = deque()
+    packer_status = {}
+    packer_run = None
+    packer_poll_pending = False
+
+    def open_packer_page() -> None:
+        task = current()
+        if task is None:
+            messagebox.showinfo("打开系统页面", "请先选中项目或分支。", parent=root)
+            return
+        branch = current_branch(task)
+        owner = task if branch is None else branch
+        report_id = owner.get("packer_id")
+        if not re.fullmatch(r"[1-9][0-9]*", str(report_id or "")):
+            messagebox.showinfo("打开系统页面", "请先点「设置报表 ID」。", parent=root)
+            return
+        url = f"https://reports.example.invalid/zh-hans/pa/report/{report_id}/view/"
+        if not webbrowser.open(url, new=2):
+            raise RuntimeError(f"无法打开浏览器，请手动访问：{url}")
+
+    def run_packer() -> None:
+        task = current()
+        if task is None:
+            messagebox.showinfo("开始比对", "请先选中项目或分支。", parent=root)
+            return
+        branch = current_branch(task)
+        owner = task if branch is None else branch
+        report_id = owner.get("packer_id")
+        if not report_id:
+            messagebox.showinfo("开始比对", "请先点「设置报表 ID」。", parent=root)
+            return
+        if any(job_id == report_id for job_id, _ in packer_queue) or (
+            packer_run is not None and packer_run[0] == report_id
+        ):
+            messagebox.showinfo("开始比对", "这个报表已在运行或排队。", parent=root)
+            return
+        if branch is not None:
+            source = branch.get("path")
+        else:
+            source = next(
+                (event["path"] for event in reversed(task["history"])
+                 if event.get("label") == STEPS[SUBMIT] and event.get("path")),
+                None,
+            )
+        if not source:
+            messagebox.showinfo("开始比对", "请先登记送入系统的 Excel。", parent=root)
+            return
+        path = Path(source)
+        if not path.is_file() or path.suffix.lower() != ".xlsx":
+            raise ValueError(f"找不到有效的 .xlsx 登记文件：{path}")
+        if not messagebox.askyesno(
+            "上传并取代报表",
+            f"用这份文件取代 Packer 报表 {report_id}？\n如果该报表正在比对，将等当前比对完成后再上传。\n\n{path}",
+            default=messagebox.NO, parent=root,
+        ):
+            return
+        packer_queue.append((report_id, path))
+        packer_status[report_id] = "排队中"
+        if not packer_poll_pending:
+            poll_packer()
+        else:
+            show_details()
+
+    def poll_packer() -> None:
+        nonlocal packer_run, packer_poll_pending
+        packer_poll_pending = False
+        if packer_run is None and packer_queue:
+            report_id, path = packer_queue.popleft()
+            directory = TemporaryDirectory(prefix="packer-desk-")
+            status_path = Path(directory.name) / "status.json"
+            output_path = Path(directory.name) / "output.log"
+            try:
+                with output_path.open("wb") as output:
+                    process = subprocess.Popen(
+                        [sys.executable, str(STATE.with_name("20 Packer比对汇出.py")),
+                         report_id, "--mode", "queue-replace", "--file", str(path),
+                         "--yes-download", "--status-file", str(status_path)],
+                        cwd=STATE.parent, stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
+                    )
+                packer_run = report_id, process, directory, status_path, output_path
+                packer_status[report_id] = "正在启动 20 号"
+            except OSError as exc:
+                directory.cleanup()
+                packer_status[report_id] = f"20 号启动失败：{exc}"
+        if packer_run is not None:
+            report_id, process, directory, status_path, output_path = packer_run
+            code = process.poll()
+            record = json.loads(status_path.read_text(encoding="utf-8"))[0] if status_path.exists() else {}
+            result = record.get("result", {})
+            if code is None:
+                packer_status[report_id] = record.get("phase", "正在启动 20 号")
+            else:
+                if code == 0 and result.get("file"):
+                    packer_status[report_id] = f'已下载：{result["file"]}'
+                else:
+                    lines = output_path.read_text(encoding="utf-8", errors="replace").strip().splitlines()
+                    error = result.get("error") or (lines[-1] if lines else f"退出码 {code}")
+                    packer_status[report_id] = f"20 号失败：{error}"
+                directory.cleanup()
+                packer_run = None
+        show_details()
+        if packer_run is not None or packer_queue:
+            packer_poll_pending = True
+            root.after(1000, poll_packer)
+
+    def packer_detail(owner: dict) -> str:
+        report_id = owner.get("packer_id")
+        status = packer_status.get(report_id)
+        return f'Packer 报表 ID  {report_id or "未登记"}' + (f'\n比对与汇出  {status}' if status else "")
+
     def selection() -> tuple[int, int | None] | None:
         selected = tree.selection()
         if not selected:
@@ -380,7 +492,7 @@ def main() -> None:
                 f'{task["name"]} / {branch.get("name", branch["sheet"])}\n'
                 f'{f3_line(branch)}\n修改备注  {branch.get("note") or "—"}'
                 f'  |  备份标记 {len(branch.get("backups", []))} 份\n'
-                f'Packer 报表 ID  {branch.get("packer_id") or "未登记"}'
+                f"{packer_detail(branch)}"
             )
             stage_label.set("当前选择  子项目")
             stage_button.state(["disabled"])
@@ -401,7 +513,7 @@ def main() -> None:
             f'最近确认  {event.get("label", "待登记")}\n'
             f'最近文件  {path or "待登记"}\n'
             f'原始总金额  {task.get("baseline", {}).get("value", "待登记")}  |  备份标记 {len(task.get("backups", []))} 份\n'
-            f'Packer 报表 ID  {task.get("packer_id") or "未登记"}'
+            f"{packer_detail(task)}"
         )
 
     def refresh(index: int | None = None, branch: int | None = None) -> None:
@@ -943,6 +1055,8 @@ def main() -> None:
     next_button = action_button(bar, "登记下一步", next_action, style_name="Stage.TButton")
     action_button(bar, "打开登记文件", open_latest)
     action_button(bar, "版本记录", show_versions)
+    action_button(bar, "开始比对", run_packer)
+    action_button(bar, "打开系统页面", open_packer_page)
     split_export_button = ttk.Button(bar, text=STEPS[EXPORT], style="Desk.TButton",
                                     command=lambda: guarded(register_export))
     stage_button = ttk.Button(stage_bar, text="该阶段完成", style="Stage.TButton",
