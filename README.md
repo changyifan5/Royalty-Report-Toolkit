@@ -1,6 +1,15 @@
-# Report Workflow Demo（ChatGPT 脱敏过）
+# Royalty Report Toolkit｜音乐版权收益报表工具箱（ChatGPT 脱敏过）
 
-桌面上的 Python 小工具集合，脚本带序号命名。
+音乐版权收益报表处理工具箱。**24 号「报表进度台」是整个工作流的主入口**，用来追踪每份报表从除错、重新比对到拆分对账的进度。其他编号工具负责 Excel 回填、筛选、拆分、汇总等具体操作，20 号负责网站比对与汇出。
+
+## 核心功能 · 24 号报表进度台
+
+- **阶段和轮次**。以原报表建立项目，按「系统汇出 → 送入系统」登记每轮除错。两步登记完才进入下一轮，确认除错完成后进入拆分阶段。
+- **拆分与金额对账**。保留原项目名称，把拆出的报表登记为子项目。对账时读取各分支当前版本的金额，加总后与原始总金额核对。
+- **版本与备份**。总项目和子项目各自记录备份。登记系统汇出时自动复制原文件，送入系统的版本可附修改备注。需要返工时，可以打开历史文件，或将分支切回旧版本再对账。
+- **连接系统比对**。总项目和分支可以分别登记报表 ID。「打开系统页面」直达报表页。「开始比对」调用 20 号，在已有比对完成后上传登记的 Excel，等待新一轮比对并下载结果。
+
+**本地体验**。Mac 双击 `运行-24报表进度台.command`，Windows 可运行 `python "24 报表进度台.py"`。也可以运行 `python demo.py`，用虚构数据查看多轮除错、拆分、版本回切和对账。公开版的系统地址为示例域名。
 
 ## 目录结构
 
@@ -48,6 +57,7 @@ python/
 | 21 | `21 TME报表合并.py` | 选 TME 文件夹 → 按报表类型和平台顺序合并为多页签 Excel |
 | 22 | `22 设置默认目录.py` | 选一次常用文件夹，作为工具箱输入文件和文件夹选择窗口的起点 |
 | 23 | `23 页签列加总.py` | 选一个 Excel → 输入列字母和起始行 → 在终端显示每个页签的合计 |
+| **24** | **`24 报表进度台.py`** | **按项目登记除错轮次、拆分分支、版本备份、系统比对和金额对账** |
 
 ## 推荐流程
 
@@ -99,7 +109,7 @@ python3 -m venv ~/.venv
 **方式二（终端）**：
 
 ```bash
-cd ./Report-Workflow-Demo
+cd ./Royalty-Report-Toolkit
 ~/.venv/bin/python "05 建档行序.py"
 ~/.venv/bin/python "01 excel_vlookup.py"
 ~/.venv/bin/python "02 半自动除错.py"
@@ -142,7 +152,7 @@ report.xlsx  →  report.bak-YYYYMMDD.xlsx
 纯逻辑函数用 Python 标准库 `unittest` 覆盖，测试样例全部在临时目录现造小 xlsx、用完即清，不依赖任何真实业务报表。从仓库根目录运行：
 
 ```bash
-cd ./Report-Workflow-Demo
+cd ./Royalty-Report-Toolkit
 ~/.venv/bin/python -m unittest discover -s tests -v
 ```
 
@@ -170,7 +180,7 @@ cd ./Report-Workflow-Demo
 | **只拉取**（下载最新，不上传） | 双击 **`运行-从GitHub拉取.bat`** | 双击 **`运行-从GitHub拉取.command`** |
 | **同步**（拉取 + 提交 + 推送） | 双击 **`运行-同步GitHub.bat`** | 双击 **`运行-同步GitHub.command`** |
 
-拉取 / 同步目标：[Report-Workflow-Demo](https://github.com/changyifan5/Report-Workflow-Demo)。  
+拉取 / 同步目标：[Royalty-Report-Toolkit](https://github.com/changyifan5/Royalty-Report-Toolkit)。  
 「只拉取」适合另一台电脑先更新代码；若本地有未提交改动，会提示**先暂存再拉取再恢复**。  
 Mac 的「同步」会先提交本地改动，再接入远端更新并推送。
 
