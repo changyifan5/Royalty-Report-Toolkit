@@ -1,0 +1,46 @@
+---
+description: Report-Workflow-Demo Excel 脚本双平台约定（Windows COM + Mac openpyxl）
+alwaysApply: true
+---
+
+# Excel 脚本双平台约定（全局）
+
+本仓库凡涉及 **Excel 批量读写、复制页签/行、写公式** 的 Python 脚本，必须同时支持 **Windows（COM 加速）** 与 **Mac（openpyxl，免费、无需 Excel）**。
+
+## 必须遵守
+
+1. **Windows**：提供配套 `NN_*_com.ps1`（PowerShell + Excel COM），Python 通过 manifest JSON 传参后调用。
+2. **Mac / 非 Windows**：用 **openpyxl** 实现同等业务逻辑（可较慢，但功能一致）。
+3. **Python 分支**（固定写法）：
+   ```python
+   if sys.platform == "win32":
+       result = run_com_...(path, ...)
+   else:
+       result = run_openpyxl_...(path, ...)
+   ```
+4. **脚本 docstring** 首段写明：`Windows 使用 Excel COM；Mac 使用 openpyxl。`
+5. **新建或改 Excel 脚本时**：若只有 openpyxl、没有 COM，视为未完成，须补 PS1。
+6. **扫描/弹窗** 可在两平台共用 Python（如只读扫颜色、选文件夹）；**重活**（复制、公式、建页签）走 COM / openpyxl 分支。
+7. **不要** 依赖 xlwings 或要求 Mac 用户购买 Excel。
+
+## 文件与复用
+
+| 用途 | 模块 / 文件 |
+|------|-------------|
+| 字体色（橙/红/蓝…） | `excel_font_color.py` |
+| 跨页签复制、行块、表头 | `excel_sheet_copy.py` |
+| 表头、行序、`__原序` | `row_order_common.py` |
+| 大表分段 | `report_chunk.py` |
+| COM 实现 | `NN_描述_com.ps1` + `NN_*_manifest.json`（临时） |
+
+## 已有 COM + openpyxl 脚本
+
+`03` `05` `06` `09` `11`（及各自 `.ps1`）
+
+纯 openpyxl、无需 COM：`01` `02` `04` `07` `10` `12` `13` `00` `08` `05 恢复行序`
+
+## 参考实现
+
+- COM 调用：`09 半自动拆分.py` → `run_com_split` + `09_split_return_com.ps1`
+- openpyxl Mac：`06 按页签另存.py` → `run_openpyxl_sync`（文件复制 + 重排页签）
+- 双分支 + 公式：`11 街版拆分.py` → `run_com_apply` / `apply_openpyxl`

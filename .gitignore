@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.venv/
+venv/
+
+# Logs
+*.log
+
+# Excel 工作数据（仅备份代码，不含业务报表）
+*.xlsx
+*.xlsm
+*.xltx
+*.xltm
+*.xls
+~$*
+
+# 分段处理临时文件
+*.bak
+*.chunkwork.xlsx
+*.chunkprogress.json
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.toolbox-default-directory
+.toolbox-default-directory.*
+
+.report-workflow.json
+.report-desk-window-size
+.report-desk-backups/

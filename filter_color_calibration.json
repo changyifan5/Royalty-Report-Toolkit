@@ -1,0 +1,75 @@
+{
+  "description": "Excel AutoFilter 校准色。各色优先读同名 *_font_calibration.json；gray_bold 仍用默认。",
+  "modes": {
+    "red_font": {
+      "label": "纯红字体",
+      "kind": "font",
+      "rgb": [
+        255,
+        0,
+        0
+      ],
+      "hex": "#FF0000",
+      "excel_theme": null,
+      "excel_tint": 0,
+      "tolerance": 12,
+      "note": "用户截图样例；见 red_font_calibration.json"
+    },
+    "blue_font": {
+      "label": "蓝色字体",
+      "kind": "font",
+      "rgb": [
+        75,
+        172,
+        198
+      ],
+      "hex": "#4BACC6",
+      "excel_theme": 8,
+      "excel_tint": 0,
+      "tolerance": 12,
+      "note": "用户截图浅天蓝 / Office theme 8；见 blue_font_calibration.json"
+    },
+    "purple_font": {
+      "label": "紫色字体",
+      "kind": "font",
+      "rgb": [
+        112,
+        48,
+        160
+      ],
+      "hex": "#7030A0",
+      "excel_theme": null,
+      "excel_tint": 0,
+      "tolerance": 12,
+      "note": "虚构校准样例；见 purple_font_calibration.json"
+    },
+    "orange_font": {
+      "label": "橙色字体",
+      "kind": "font",
+      "rgb": [
+        192,
+        80,
+        77
+      ],
+      "hex": "#C0504D",
+      "excel_theme": 5,
+      "excel_tint": 0,
+      "tolerance": 12,
+      "note": "见 orange_font_calibration.json"
+    },
+    "gray_bold": {
+      "label": "灰底加粗",
+      "kind": "interior",
+      "rgb": [
+        217,
+        217,
+        217
+      ],
+      "hex": "#D9D9D9",
+      "excel_theme": null,
+      "excel_tint": 0,
+      "tolerance": 20,
+      "note": "未单独校准；筛选仍用默认灰"
+    }
+  }
+}
